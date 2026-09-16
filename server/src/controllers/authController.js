@@ -17,7 +17,7 @@ function setRefreshCookie(res, token) {
   res.cookie(REFRESH_COOKIE_NAME, token, {
     httpOnly: true,
     secure: env.isProd,
-    sameSite: env.isProd ? 'strict' : 'lax',
+    sameSite: env.isProd ? 'none' : 'lax',
     domain: env.cookieDomain,
     maxAge: 30 * 24 * 60 * 60 * 1000,
     path: '/api/auth',
