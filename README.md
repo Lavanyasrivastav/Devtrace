@@ -1,5 +1,9 @@
 # DevTrace
 
+**Live demo:** [devtrace-six.vercel.app](https://devtrace-six.vercel.app/) — frontend on Vercel, API on Render ([devtrace-1-6q5m.onrender.com](https://devtrace-1-6q5m.onrender.com/)), database on MongoDB Atlas, cache/queue on Upstash Redis.
+
+> Note: the Render free tier spins down after 15 minutes of inactivity — the first request after a period of no traffic can take 30–60 seconds to wake up. This is a free-tier limitation, not a bug.
+
 A centralized error intelligence and application monitoring platform — a simplified, original-architecture take on what Sentry, LogRocket, and Datadog error monitoring do, built end-to-end with the MERN stack, Redis, BullMQ, and Socket.IO.
 
 ## Features
@@ -84,6 +88,112 @@ devtrace/
 ## Installation & Local Development
 
 ### Option A — Docker Compose (fastest)
+
+```bash
+cp .env.example .env   # fill in JWT secrets
+docker-compose up --build
+```
+
+This starts MongoDB, Redis, the API server, the background worker, and the client (served via nginx) — all in one command. Client at `http://localhost:5173`, API at `http://localhost:5000`.
+
+### Option B — Run natively (for active development)
+
+**Backend:**
+```bash
+cd server
+npm install
+cp .env.example .env
+docker run -d --name devtrace-mongo -p 27017:27017 mongo:7
+docker run -d --name devtrace-redis -p 6379:6379 redis:7
+npm run dev          # API server, terminal 1
+npm run worker:dev   # background worker, terminal 2
+```
+
+**Frontend:**
+```bash
+cd client
+npm install
+cp .env.example .env
+npm run dev
+```
+
+## Environment Variables
+
+**`server/.env`**
+| Variable | Description |
+|---|---|
+| `PORT` | API server port (default 5000) |
+| `NODE_ENV` | `development` \| `production` \| `test` |
+| `MONGODB_URI` | Mongo connection string |
+| `REDIS_URL` | Redis connection string |
+| `JWT_SECRET` / `JWT_REFRESH_SECRET` | Long random strings — never commit real values |
+| `JWT_ACCESS_EXPIRY` / `JWT_REFRESH_EXPIRY` | Token lifetimes (default `15m` / `30d`) |
+| `CLIENT_URL` | Frontend origin, used for CORS and cookie scoping |
+| `COOKIE_DOMAIN` | Cookie domain for the refresh token |
+
+**`client/.env`**
+| Variable | Description |
+|---|---|
+| `VITE_API_URL` | Backend API base URL |
+| `VITE_SOCKET_URL` | Backend Socket.IO URL (usually same host, no `/api`) |
+
+## Running Tests
+
+```bash
+# Server — needs a local MongoDB + Redis running (see Option B above)
+cd server
+npm test
+
+# Client
+cd client
+npm test
+```
+
+Integration tests use a **separate test database** (`devtrace_test` by default, overridable via `TEST_MONGODB_URI`) and bypass rate limiting automatically in `NODE_ENV=test` — they never touch your dev data.
+
+## API Documentation
+
+Once the server is running, open `http://localhost:5000/api/docs` for interactive Swagger UI covering auth, projects, ingestion, errors, analytics, and monitors.
+
+## Deployment Guide
+
+### 1. MongoDB Atlas
+Create a free cluster at [mongodb.com/atlas](https://www.mongodb.com/atlas), add a database user, whitelist your deployment platform's IP (or `0.0.0.0/0` for simplicity on a free tier), and copy the connection string into `MONGODB_URI`.
+
+### 2. Redis (Upstash or Redis Cloud)
+Create a free Redis instance at [upstash.com](https://upstash.com) or [redis.com/cloud](https://redis.com/try-free/). Copy the connection URL (with TLS if offered) into `REDIS_URL`.
+
+### 3. Backend — Render or Railway
+- Create a new Web Service from your repo, root directory `server`.
+- Build command: `npm install`. Start command: `node src/server.js`.
+- Set all env vars from the table above (`MONGODB_URI`, `REDIS_URL`, `JWT_SECRET`, `JWT_REFRESH_SECRET`, `CLIENT_URL` = your deployed frontend URL). Leave `COOKIE_DOMAIN` **unset** unless frontend and backend share a parent domain — see the Cookies section below.
+- Deploy a **second** service the same way for the worker, with start command `node src/worker.js`.
+
+### 4. Frontend — Vercel
+- Import the repo, set root directory to `client`.
+- Framework preset: Vite.
+- Environment variables: `VITE_API_URL` = your deployed backend URL + `/api`, `VITE_SOCKET_URL` = your deployed backend URL.
+
+### 5. CORS
+`CLIENT_URL` on the backend must exactly match your deployed frontend origin (including protocol) — Express CORS will reject requests otherwise.
+
+### 6. Cookies in production (cross-site setup — e.g. Vercel + Render)
+When the frontend and backend are on **different domains** with no shared parent (like `*.vercel.app` and `*.onrender.com` — this project's actual live setup), two things are required:
+- **Leave `COOKIE_DOMAIN` unset** on the backend. There's no common parent domain to scope it to, so the cookie should default to the backend's own exact host.
+- **The refresh cookie must use `SameSite=None`** (paired with `Secure`, i.e. HTTPS-only) rather than `Strict` — `Strict`/`Lax` cause the browser to silently drop the cookie on cross-site requests, which breaks token refresh ~15 minutes after login with no obvious error. This is already handled in `authController.js`'s `setRefreshCookie()`.
+
+If you instead deploy frontend and backend under the **same parent domain** (e.g. `app.yourapp.com` and `api.yourapp.com`), you can set `COOKIE_DOMAIN=.yourapp.com` and use the stricter `SameSite=Strict` instead — but that's not the setup this README's live demo uses.
+
+### 7. Socket.IO in production
+No extra configuration needed beyond `CLIENT_URL` — the Redis adapter is already wired in (`sockets/index.js`), so this deployment is ready to scale to multiple backend instances behind a load balancer without additional changes.
+
+## Future Improvements
+
+- Comments, activity log, and fix-history knowledge base (models + endpoints + UI)
+- Log file upload ingestion pipeline
+- Rule-based (then AI-based) fix suggestion engine
+- Per-project configurable ingestion rate limits
+- Multi-region worker deployment for monitoring checks
 
 ```bash
 cp .env.example .env   # fill in JWT secrets
